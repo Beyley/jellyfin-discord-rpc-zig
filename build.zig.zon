@@ -1,0 +1,17 @@
+.{
+    .name = .jellyfin_discord_rpc_zig,
+    .version = "0.0.0",
+    .fingerprint = 0xb8fc19322ee509d7, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .zig_discord = .{
+            .url = "git+https://github.com/Beyley/zig-discord#88f912248ca5bc2aecdbcbe56b3e228d9f31f3e0",
+            .hash = "zig_discord-0.0.0-nFGlpytXAACWb_QrKNbd46YcHWMCaCZzXaZNKs2pPcuq",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
