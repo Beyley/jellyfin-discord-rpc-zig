@@ -9,7 +9,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const osc_dep = b.dependency("osc", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const discord_mod = discord_dep.module("rpc");
+    const osc_mod = osc_dep.module("zosc");
 
     const exe = b.addExecutable(.{
         .name = "jellyfin_discord_rpc",
@@ -19,6 +25,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "rpc", .module = discord_mod },
+                .{ .name = "osc", .module = osc_mod },
             },
             .link_libc = true,
         }),

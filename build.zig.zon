@@ -8,6 +8,9 @@
             .url = "git+https://github.com/Beyley/zig-discord#88f912248ca5bc2aecdbcbe56b3e228d9f31f3e0",
             .hash = "zig_discord-0.0.0-nFGlpytXAACWb_QrKNbd46YcHWMCaCZzXaZNKs2pPcuq",
         },
+        .osc = .{
+            .path = "zig-osc/",
+        },
     },
     .paths = .{
         "build.zig",
