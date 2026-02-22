@@ -209,6 +209,7 @@ var run = true;
 
 const osc_escape_char = '¦';
 const osc_replacement = '|';
+const osc_escape_str: []const u8 = &.{osc_escape_char};
 
 fn oscEscape(str: []u8) void {
     std.mem.replaceScalar(u8, str, osc_escape_char, osc_replacement);
@@ -286,7 +287,7 @@ const Caches = struct {
         return true;
     }
 
-    pub fn tick(self: *Caches, gpa: std.mem.Allocator, now_playing: Item) void {
+    pub fn tick(self: *Caches, gpa: std.mem.Allocator, now_playing: Item) !void {
         // Don't tick if the song hasn't changed
         if (self.mebi_last_id) |last_id| {
             if (std.mem.eql(u8, now_playing.Id, last_id)) {
@@ -294,7 +295,11 @@ const Caches = struct {
             }
         }
 
-        self.mebi_last_id = now_playing.Id;
+        if (self.mebi_last_id) |last_id| {
+            gpa.free(last_id);
+            self.mebi_last_id = null;
+        }
+        self.mebi_last_id = try gpa.dupe(u8, now_playing.Id);
 
         inline for (&.{ &self.musicbrainz, &self.song_link, &self.jellyfin }) |map| {
             var i: usize = 0;
@@ -342,6 +347,42 @@ const ParsedItem = struct {
     mebi_listen_url: ?[]const u8,
 
     mebi_lyrics: ?[]Lyric,
+
+    pub fn toOsc(gpa: std.mem.Allocator, self: *const ParsedItem) ![]u8 {
+        return oscEscape(try std.fmt.allocPrint(
+            gpa,
+            "{s}" ++ osc_escape_str ++ // song_id
+                "{s}" ++ osc_escape_str ++ // song_title
+                "{s}" ++ osc_escape_str ++ // song_image
+                "{s}" ++ osc_escape_str ++ // mebi_song_url
+
+                "{s}" ++ osc_escape_str ++ // mebi_album_title
+                "{s}" ++ osc_escape_str ++ // mebi_album_url
+
+                "{s}" ++ osc_escape_str ++ // mebi_artist_name
+                "{s}" ++ osc_escape_str ++ // mebi_artist_image
+                "{s}" ++ osc_escape_str ++ // mebi_artist_url
+
+                "{s}" ++ osc_escape_str ++ // mebi_stream_url
+                "{s}" ++ osc_escape_str, // mebi_listen_url
+            .{
+                self.song_id,
+                self.song_title,
+                self.song_image,
+                self.mebi_song_url orelse "",
+
+                self.mebi_album_title orelse "",
+                self.mebi_album_url orelse "",
+
+                self.mebi_artist_name orelse "",
+                self.mebi_artist_image orelse "",
+                self.mebi_artist_url orelse "",
+
+                self.mebi_stream_url orelse "",
+                self.mebi_listen_url orelse "",
+            },
+        ));
+    }
 
     pub fn fromJellyfin(
         gpa: std.mem.Allocator,
@@ -775,7 +816,7 @@ pub fn main() !void {
 
         const now_playing = session.NowPlayingItem.?;
 
-        caches.tick(gpa, now_playing);
+        try caches.tick(gpa, now_playing);
 
         const parsed_item: ParsedItem = try .fromJellyfin(
             gpa,
@@ -851,36 +892,30 @@ pub fn main() !void {
         clear = false;
 
         {
-            // sendOsc(&osc_client, &osc_buf, "/SongTitle", now_playing.Name);
-            // sendOsc(&osc_client, &osc_buf, "/AlbumTitle", now_playing.Album orelse "");
-            // sendOsc(&osc_client, &osc_buf, "/SongImage", try std.fmt.allocPrint(loop_arena, "{f}", .{try imageUrl(loop_arena, base_uri, now_playing.Id)}));
-            // sendOsc(
-            //     &osc_client,
-            //     &osc_buf,
-            //     "/ArtistImage",
-            //     if (mebi_artist) |artist| try std.fmt.allocPrint(loop_arena, "{f}", .{try imageUrl(loop_arena, base_uri, artist.Id)}) else "",
-            // );
-            // sendOsc(&osc_client, &osc_buf, "/ArtistName", if (mebi_artist) |artist| artist.Name orelse "" else "");
+            sendOsc(&osc_client, &osc_buf, "/SongTitle", parsed_item.song_title);
+            sendOsc(&osc_client, &osc_buf, "/AlbumTitle", parsed_item.mebi_album_title orelse "");
+            sendOsc(&osc_client, &osc_buf, "/SongImage", parsed_item.song_image);
+            sendOsc(&osc_client, &osc_buf, "/ArtistImage", parsed_item.mebi_artist_image orelse "");
+            sendOsc(&osc_client, &osc_buf, "/ArtistName", parsed_item.mebi_artist_name orelse "");
+            sendOsc(&osc_client, &osc_buf, "/SongURL", parsed_item.mebi_song_url orelse "");
+            sendOsc(&osc_client, &osc_buf, "/ArtistURL", parsed_item.mebi_artist_url orelse "");
+            sendOsc(&osc_client, &osc_buf, "/AlbumURL", parsed_item.mebi_album_url orelse "");
 
-            // sendOsc(&osc_client, &osc_buf, "/SongURL", musicbrainz_cache.mebi_song_url orelse "");
-            // sendOsc(&osc_client, &osc_buf, "/ArtistURL", musicbrainz_cache.artist_url orelse "");
-            // sendOsc(&osc_client, &osc_buf, "/AlbumURL", album_url orelse "");
+            sendOsc(&osc_client, &osc_buf, "/CurrentLyric", current_lyric orelse "");
 
-            // sendOsc(&osc_client, &osc_buf, "/CurrentLyric", current_lyric orelse "");
+            sendOsc(&osc_client, &osc_buf, "/StreamURL", parsed_item.mebi_stream_url orelse "");
 
-            // sendOsc(&osc_client, &osc_buf, "/StreamURL", try std.fmt.allocPrint(loop_arena, "{f}", .{try streamUrl(loop_arena, base_uri, now_playing.Id)}));
+            if (timestamps) |timestamp| {
+                sendOsc(&osc_client, &osc_buf, "/StartTime", try std.fmt.allocPrint(loop_arena, "{d}", .{timestamp.start orelse @as(i65, -1)}));
+                sendOsc(&osc_client, &osc_buf, "/EndTime", try std.fmt.allocPrint(loop_arena, "{d}", .{timestamp.end orelse @as(i65, -1)}));
+            } else {
+                sendOsc(&osc_client, &osc_buf, "/StartTime", "-1");
+                sendOsc(&osc_client, &osc_buf, "/EndTime", "-1");
+            }
 
-            // if (timestamps) |timestamp| {
-            //     sendOsc(&osc_client, &osc_buf, "/StartTime", try std.fmt.allocPrint(loop_arena, "{d}", .{timestamp.start orelse @as(i65, -1)}));
-            //     sendOsc(&osc_client, &osc_buf, "/EndTime", try std.fmt.allocPrint(loop_arena, "{d}", .{timestamp.end orelse @as(i65, -1)}));
-            // } else {
-            //     sendOsc(&osc_client, &osc_buf, "/StartTime", "-1");
-            //     sendOsc(&osc_client, &osc_buf, "/EndTime", "-1");
-            // }
+            sendOsc(&osc_client, &osc_buf, "/PlaybackState", "1");
 
-            // sendOsc(&osc_client, &osc_buf, "/PlaybackState", "1");
-
-            // std.debug.print("OSC SENT\n", .{});
+            std.debug.print("OSC SENT\n", .{});
         }
 
         if (now - last_discord_send > 7) {
